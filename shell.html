@@ -47,32 +47,67 @@ frame.addEventListener('load',()=>{
           };
         }
 
+        function timerToHours(raw){
+          if(!raw)return null;
+          const parts=raw.replace(/,/g,'').replace(/\\s/g,'').split(':').map(Number);
+          if(parts.length!==2&&parts.length!==3)return null;
+          if(parts.some(x=>!Number.isFinite(x)))return null;
+          const h=parts[0],min=parts[1],sec=parts.length===3?parts[2]:0;
+          if(h<0||min<0||min>59||sec<0||sec>59)return null;
+          return h+(min/60)+(sec/3600);
+        }
+
+        function findTimerNearLabels(text,labels){
+          const lines=text.toUpperCase().split(/\\n+/).map(x=>x.replace(/\\s+/g,' ').trim()).filter(Boolean);
+          const timer=/\\d[\\d,]*\\s*:\\s*[0-5]\\d(?:\\s*:\\s*[0-5]\\d)?/g;
+          for(let i=0;i<lines.length;i++){
+            if(labels.some(l=>lines[i].includes(l))){
+              for(let j=i;j<=Math.min(i+2,lines.length-1);j++){
+                const z=lines[j].match(timer);
+                if(z){
+                  const v=timerToHours(z[0]);
+                  if(v!==null)return v;
+                }
+              }
+            }
+          }
+          return null;
+        }
+
         const originalRunOCR=runOCR;
         runOCR=async function(photo,m){
-          if(m.id!==7)return originalRunOCR(photo,m);
+          if(m.id!==7&&m.type!=='haas')return originalRunOCR(photo,m);
           try{
             ocrMsg.innerHTML='OCR loading…';
             if(!window.Tesseract)throw Error('OCR library not loaded');
             const out=await Tesseract.recognize(photo,'eng',{logger:x=>{
-              if(x.status==='recognizing text')ocrMsg.textContent='Reading Hurco 5… '+Math.round((x.progress||0)*100)+'%';
+              if(x.status==='recognizing text')ocrMsg.textContent='Reading '+m.name+'… '+Math.round((x.progress||0)*100)+'%';
             }});
             const text=(out.data.text||'').toUpperCase();
             const conf=Math.max(0,Math.min(1,(out.data.confidence||0)/100));
-            const labels=['MACHINE TIME','MACHINE TIMER','MACHINE HOURS','MACHINING TIME','MACH TIME','RUN TIME','RUNTIME','TOTAL MACHINE TIME','TOTAL MACHINING TIME','OPERATING TIME','OPERATION TIME'];
-            const lines=text.split(/\\n+/).map(x=>x.replace(/\\s+/g,' ').trim()).filter(Boolean);
-            let machineV=null;
-            const hhmm=/(\\d[\\d,]*\\s*:\\s*[0-5]\\d)/g;
-            for(let i=0;i<lines.length&&machineV===null;i++){
-              if(labels.some(l=>lines[i].includes(l))){
-                for(let j=i;j<=Math.min(i+2,lines.length-1);j++){
-                  const z=lines[j].match(hhmm);
-                  if(z){machineV=parseNum(z[0].replace(/\\s/g,''));if(machineV!==null)break;}
-                }
+
+            if(m.type==='haas'){
+              const cycleLabels=['MACHINE TIME','CYCLE TIME','MACHINE/CYCLE TIME','TOTAL CYCLE TIME'];
+              const feedLabels=['FEED CUTTING TIME','FEED CUT TIME','FEED CUTTING','FEED TIME','FEED TIMER','CUTTING FEED TIME'];
+              let cycleV=findTimerNearLabels(text,cycleLabels);
+              let feedV=findTimerNearLabels(text,feedLabels);
+              if(cycleV===null)cycleV=findLabeled(text,cycleLabels);
+              if(feedV===null)feedV=findLabeled(text,feedLabels);
+              if(cycleV!==null)cycle.value=cycleV.toFixed(6).replace(/0+$/,'').replace(/\\.$/,'');
+              if(feedV!==null)feed.value=feedV.toFixed(6).replace(/0+$/,'').replace(/\\.$/,'');
+              if(cycleV!==null&&feedV!==null){
+                ocrMsg.innerHTML='<b>✓ Read complete.</b> Haas timers accept hh:mm or hh:mm:ss and are converted to decimal hours for calculations. OCR confidence '+Math.round(conf*100)+'%. Verify both fields, then Save.';
+              }else{
+                ocrMsg.innerHTML='<b>⚠ Could not confidently locate both Haas timer values.</b> Retake the photo or correct the fields.';
               }
+              return;
             }
+
+            const labels=['MACHINE TIME','MACHINE TIMER','MACHINE HOURS','MACHINING TIME','MACH TIME','RUN TIME','RUNTIME','TOTAL MACHINE TIME','TOTAL MACHINING TIME','OPERATING TIME','OPERATION TIME'];
+            let machineV=findTimerNearLabels(text,labels);
             if(machineV===null)machineV=findLabeled(text,labels);
             if(machineV!==null){
-              machine.value=machineV.toFixed(4).replace(/0+$/,'').replace(/\\.$/,'');
+              machine.value=machineV.toFixed(6).replace(/0+$/,'').replace(/\\.$/,'');
               ocrMsg.innerHTML='<b>✓ Read complete.</b> Hurco 5 hh:mm was accepted and converted to decimal hours. OCR confidence '+Math.round(conf*100)+'%. Verify Machine Time, then Save.';
             }else{
               ocrMsg.innerHTML='<b>⚠ Could not confidently locate Hurco 5 Machine Time.</b> Retake the photo or correct the field.';
