@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b263d">
+<title>Machine Track</title>
+<style>
+html,body{margin:0;width:100%;height:100%;background:#eef3f7;font-family:Arial,sans-serif}#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#071c2c,#146b9d);color:#fff;font-weight:800;z-index:3}iframe{border:0;width:100%;height:100%;display:block;visibility:hidden}
+</style>
+</head>
+<body>
+<div id="loading">Loading Machine Track…</div>
+<iframe id="mt" src="./app.html" title="Machine Track"></iframe>
+<script>
+const frame=document.getElementById('mt');
+frame.addEventListener('load',()=>{
+  try{
+    frame.contentWindow.eval(`
+      (function(){
+        if(window.__MT_HURCO_PATCH__)return;
+        window.__MT_HURCO_PATCH__=true;
+        const HIDDEN_ID=8;
+        const active=()=>S.machines.filter(m=>m.id!==HIDDEN_ID);
+        const originalRows=rows;
+        rows=function(){return originalRows().filter(r=>r.machineId!==HIDDEN_ID)};
+
+        function wrapMachineView(name){
+          const original=window[name];
+          if(typeof original!=='function')return;
+          window[name]=function(...args){
+            const all=S.machines;
+            if(S.selected===HIDDEN_ID)S.selected=7;
+            S.machines=all.filter(m=>m.id!==HIDDEN_ID);
+            try{return original.apply(this,args)}finally{S.machines=all}
+          };
+        }
+        ['render','graphs','report','settings'].forEach(wrapMachineView);
+
+        if(typeof saveNames==='function'){
+          saveNames=function(){
+            active().forEach(m=>{
+              const el=document.getElementById('mn'+m.id);
+              if(el)m.name=el.value.trim()||m.name;
+            });
+            save();render();
+          };
+        }
+
+        const originalRunOCR=runOCR;
+        runOCR=async function(photo,m){
+          if(m.id!==7)return originalRunOCR(photo,m);
+          try{
+            ocrMsg.innerHTML='OCR loading…';
+            if(!window.Tesseract)throw Error('OCR library not loaded');
+            const out=await Tesseract.recognize(photo,'eng',{logger:x=>{
+              if(x.status==='recognizing text')ocrMsg.textContent='Reading Hurco 5… '+Math.round((x.progress||0)*100)+'%';
+            }});
+            const text=(out.data.text||'').toUpperCase();
+            const conf=Math.max(0,Math.min(1,(out.data.confidence||0)/100));
+            const labels=['MACHINE TIME','MACHINE TIMER','MACHINE HOURS','MACHINING TIME','MACH TIME','RUN TIME','RUNTIME','TOTAL MACHINE TIME','TOTAL MACHINING TIME','OPERATING TIME','OPERATION TIME'];
+            const lines=text.split(/\\n+/).map(x=>x.replace(/\\s+/g,' ').trim()).filter(Boolean);
+            let machineV=null;
+            const hhmm=/(\\d[\\d,]*\\s*:\\s*[0-5]\\d)/g;
+            for(let i=0;i<lines.length&&machineV===null;i++){
+              if(labels.some(l=>lines[i].includes(l))){
+                for(let j=i;j<=Math.min(i+2,lines.length-1);j++){
+                  const z=lines[j].match(hhmm);
+                  if(z){machineV=parseNum(z[0].replace(/\\s/g,''));if(machineV!==null)break;}
+                }
+              }
+            }
+            if(machineV===null)machineV=findLabeled(text,labels);
+            if(machineV!==null){
+              machine.value=machineV.toFixed(4).replace(/0+$/,'').replace(/\\.$/,'');
+              ocrMsg.innerHTML='<b>✓ Read complete.</b> Hurco 5 hh:mm was accepted and converted to decimal hours. OCR confidence '+Math.round(conf*100)+'%. Verify Machine Time, then Save.';
+            }else{
+              ocrMsg.innerHTML='<b>⚠ Could not confidently locate Hurco 5 Machine Time.</b> Retake the photo or correct the field.';
+            }
+          }catch(e){
+            ocrMsg.innerHTML='<b>OCR could not start/read this image.</b> Retake the photo or use manual fallback.';
+          }
+        };
+
+        if(S.selected===HIDDEN_ID)S.selected=7;
+        render();
+      })();
+    `);
+    frame.style.visibility='visible';
+    document.getElementById('loading').style.display='none';
+  }catch(e){
+    document.getElementById('loading').textContent='Machine Track could not load. Refresh and try again.';
+  }
+});
+</script>
+</body>
+</html>
