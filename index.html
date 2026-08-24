@@ -22,7 +22,7 @@
 </form>
 </div>
 <script>
-function go(){location.replace('./app.html')}
+function go(){location.replace('./shell.html')}
 async function prepare(){
   if('serviceWorker' in navigator){
     try{await navigator.serviceWorker.register('./sw.js');await navigator.serviceWorker.ready}catch(e){}
